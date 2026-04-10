@@ -100,33 +100,28 @@ rm /var/lib/postgresql/15/main/pg_wal/archive_status/*.done 2>/dev/null
 **Target: free 500 MB minimum before attempting to start the database.**
 
 > [!WARNING]
-> **Do not delete WAL files arbitrarily.** PostgreSQL requires a contiguous WAL chain to start. Deleting random files will corrupt the database and convert a recoverable disk-full incident into a data loss incident. If you are not certain which WAL files are oldest, do not delete any. Free space from another source first.
+> **Do not delete WAL files arbitrarily from the OS.** PostgreSQL requires a contiguous WAL chain to start. If you delete a WAL file that the primary still needs for crash recovery, or one that hasn't been archived yet, you will permanently corrupt the database. 
+> 
+> **The correct approach:** Expand the EBS/disk volume at the hypervisor or cloud provider level. Adding 5 GB of disk space takes 2 minutes in AWS/Azure and carries zero risk.
+>
+> If you are on bare metal and absolutely cannot expand the disk, you can use `pg_archivecleanup` to safely remove WAL files that PostgreSQL no longer needs. Do not use `rm` or `del` directly unless guided by senior engineering.
 
-**If you must delete WAL segments (last resort):**
+**If you must reclaim WAL space without expanding the disk:**
 
-WAL files are named with hex LSN values — lower hex = older. Deleting from the oldest end minimizes risk.
+You must first find the oldest WAL segment PostgreSQL still requires for crash recovery. You can find this in the control data:
 
 ```bash
-# Linux/macOS — list WAL files sorted oldest-first (lowest name = oldest)
-ls /var/lib/postgresql/15/main/pg_wal/ | grep -v '\.history\|archive_status' | sort | head -35
-
-# Each WAL segment is 16 MB by default.
-# Deleting 32 files frees ~500 MB.
-# Delete the oldest 32 — adjust the count to your situation:
-ls /var/lib/postgresql/15/main/pg_wal/ | grep -v '\.history\|archive_status' | \
-  sort | head -32 | xargs -I{} rm /var/lib/postgresql/15/main/pg_wal/{}
+# Find the latest checkpoint's REDO WAL file
+sudo -u postgres pg_controldata /var/lib/postgresql/15/main | grep "Latest checkpoint's REDO WAL file"
+# Example output: Latest checkpoint's REDO WAL file: 00000001000000140000002A
 ```
 
-```powershell
-# Windows — list WAL files oldest-first
-Get-ChildItem "C:\Program Files\PostgreSQL\15\data\pg_wal" -File |
-  Where-Object { $_.Name -notmatch '\.history$' } |
-  Sort-Object Name | Select-Object -First 32 | Select-Object Name, Length
-# Review the list, then delete:
-# Get-ChildItem ... | Sort-Object Name | Select-Object -First 32 | Remove-Item
-```
+Then, use `pg_archivecleanup` to safely remove files older than that specific segment:
 
-Keep a list of what you deleted. Add it to the post-mortem.
+```bash
+# This removes all WAL files older than 00000001000000140000002A
+sudo -u postgres pg_archivecleanup -d /var/lib/postgresql/15/main/pg_wal/ 00000001000000140000002A
+```
 
 ---
 
@@ -198,9 +193,11 @@ FROM pg_replication_slots
 ORDER BY pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) DESC;
 ```
 
-Note the `slot_name`. **Before dropping, confirm with the client or team:**
+Note the `slot_name`. **Before dropping, confirm the trade-off with the client or team:**
 
-> "I'm about to drop the replication slot `[slot_name]`. This allows PostgreSQL to reclaim the retained WAL. If this slot is still in use by a replication consumer, that consumer will need a full resync. Please confirm it's safe to drop."
+> "I'm about to drop the replication slot `[slot_name]`. This allows PostgreSQL to reclaim the retained WAL. 
+> 
+> **The trade-off:** If this slot belongs to a logical replication consumer (like Debezium, Kafka, or an ETL pipeline) that is currently offline but coming back, dropping the slot breaks their place permanently. They will require a full snapshot resync, which could take hours or days. We choose to break the downstream consumer to save the primary database from crashing again. Please confirm it's safe to drop."
 
 ```sql
 -- Drop the slot. Replace 'slot_name_here' with the actual name.

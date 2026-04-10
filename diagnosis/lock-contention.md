@@ -64,9 +64,14 @@ ORDER BY wait_duration DESC;
 
 ---
 
-## Step 2 — Deadlock diagnosis
+## Step 2 — Deadlock vs Long-Running Lock Waits
 
-A deadlock means two sessions are each waiting for a lock held by the other. PostgreSQL detects this automatically and terminates one session (the victim). You will see this in the log:
+It's critical to differentiate between a **deadlock** and a **long-running lock wait** (lock contention).
+
+*   **Lock Contention (Queueing):** Session A holds a lock on Row 1. Session B wants a lock on Row 1, so it queues and waits until Session A finishes. This can go on for hours. You can diagnose this live using the query from Step 1 above.
+*   **Deadlock (Circular Dependency):** Session A holds a lock on Row 1 and waits for Row 2. Session B holds a lock on Row 2 and waits for Row 1. Neither can move. PostgreSQL detects this automatically, kills one session (the "victim") instantly, and lets the other proceed.
+
+**You cannot catch a deadlock live with `pg_stat_activity` because PostgreSQL resolves it in milliseconds.** If you suspect a deadlock, you must look at the logs:
 
 ```
 ERROR:  deadlock detected
@@ -81,11 +86,11 @@ HINT:  See server log for query details.
 - The query each was running at the time (logged immediately below the deadlock line)
 - The tables involved
 
-Deadlocks are almost always an application-level issue: two code paths acquire locks on the same tables in different orders. The fix is to standardize the lock acquisition order in the application, not to change PostgreSQL configuration.
+Deadlocks are almost always an application-level issue: two code paths acquire locks on the same tables in different orders. The fix is to standardize the lock acquisition order in the application code, not to change PostgreSQL configuration or terminate sessions.
 
 ```sql
--- After a deadlock, check pg_stat_activity for the surviving sessions
--- to understand what operation was being performed.
+-- Post-mortem: After a deadlock occurs, check pg_stat_activity for the surviving session 
+-- (the one that wasn't killed as the victim) to understand what operation succeeded.
 SELECT pid, usename, state, left(query, 150) AS query
 FROM pg_stat_activity
 WHERE pid IN (12345, 11111);  -- replace with actual PIDs from the log
