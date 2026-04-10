@@ -4,6 +4,9 @@ This document defines severity levels for all incidents affecting PostgreSQL env
 
 If two engineers independently classify the same incident, they should agree 90% of the time. If the definitions feel ambiguous for a specific case, default to the higher severity and reassess after initial stabilization.
 
+> [!NOTE]
+> **Adapt SLAs to your team's capacity.** The SLA values below (15-minute P1 response, 4-hour resolution) assume a dedicated on-call engineer with access to all systems. A solo engineer covering 500+ clients during business hours has different operational realities than a 24/7 NOC. The *structure* of the matrix — classification criteria, escalation triggers, communication cadence — transfers directly. The *numbers* should be calibrated to whatever your actual SLA contract or operational agreement states. If you have no formal SLA, these defaults are a reasonable starting point.
+
 ---
 
 ## Severity Matrix

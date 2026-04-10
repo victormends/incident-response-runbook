@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Severity: P1.** This incident prevents the database from starting or causes it to shut down mid-operation.
 > **Estimated recovery time: 20–45 minutes** if this runbook is followed exactly.
-> **Prerequisites:** Windows administrative access, PostgreSQL superuser credentials.
+> **Prerequisites:** OS-level access to the PostgreSQL host, PostgreSQL superuser credentials.
 
 The `pg_wal` directory has consumed all available disk space. PostgreSQL cannot write new WAL segments. The database has shut down or refuses to start. This is not a data loss event — it is a disk space event. If you follow this runbook without deviating, recovery is predictable and complete.
 
@@ -19,8 +19,28 @@ Before touching anything:
 
 - [ ] Note the current time — your post-mortem timeline starts now.
 - [ ] If the database is still running: connect immediately and run the slot query below. Save the output.
-- [ ] Open Windows Event Viewer → Application log → filter source "PostgreSQL" — save the last 20 entries.
-- [ ] Confirm `pg_wal` is the problem. Open WizTree as Administrator (free, much faster than Windows Explorer for large directories). Scan the PostgreSQL data directory. If `pg_wal` is the largest subdirectory and disk free space is near zero, proceed.
+- [ ] Check OS logs for PostgreSQL entries.
+- [ ] Confirm `pg_wal` is the problem: identify the largest directory under the PostgreSQL data directory.
+
+**Confirm disk exhaustion and locate pg_wal:**
+
+```bash
+# Linux / macOS
+df -h $(psql -U postgres -tAc "SHOW data_directory")
+
+# Find the data directory if psql is unavailable
+psql -U postgres -tAc "SHOW data_directory"
+# Then check disk usage of pg_wal specifically:
+du -sh /var/lib/postgresql/15/main/pg_wal
+```
+
+```powershell
+# Windows — use WizTree (free, much faster than Explorer for large directories)
+# Or via PowerShell:
+$dataDir = psql -U postgres -tAc "SHOW data_directory"
+Get-ChildItem "$dataDir\pg_wal" | Measure-Object -Property Length -Sum |
+  Select-Object @{N='TotalGB';E={[math]::Round($_.Sum/1GB,2)}}
+```
 
 **If the database is still running, run this immediately:**
 
@@ -53,57 +73,100 @@ This is not a PostgreSQL bug. The fix is `pg_drop_replication_slot()`. The chall
 
 ## Step 1 — Create enough free space to start the database
 
-The database needs approximately 100–300 MB of free space to start (enough to write a checkpoint). You must free this space without risking data corruption.
+The database needs approximately 100–300 MB of free space to start (enough to write a checkpoint). Free this space without risking data corruption.
 
-**Safe space sources (try these first — zero risk of corruption):**
+**Safe space sources (zero risk of corruption — try these first):**
 
-1. Application logs on the same volume — PostgreSQL application logs, IIS logs, event log exports. Delete anything older than 7 days.
-2. Temp CSV exports or report files — anything in temp folders, Downloads, Desktop that your team placed there.
-3. Old backup files (`.dump`, `.sql`, `.tar`) that have already been confirmed good — check with the team before deleting.
-4. `pg_wal/archive_status/` subdirectory contents — these are metadata files (`.ready`, `.done` extensions). They are not WAL data. Typically only a few kilobytes but safe to delete.
+1. Application logs on the same volume. Delete anything older than your retention policy.
+2. Temp files, CSV exports, report files left by operations or ETL jobs.
+3. Old backup files (`.dump`, `.sql`, `.tar`) already confirmed good — check with the team before deleting.
+4. `pg_wal/archive_status/` subdirectory contents — these are metadata files (`.ready`, `.done`), not WAL data. Safe to delete.
+
+**Check and free space on Linux/macOS:**
+
+```bash
+# Find large files on the same partition as pg_wal
+df -h /var/lib/postgresql/15/main/pg_wal
+
+# Find top consumers on that partition
+du -sh /var/lib/postgresql/15/main/* | sort -rh | head -20
+
+# Check archive_status directory (safe to clear)
+ls -lh /var/lib/postgresql/15/main/pg_wal/archive_status/
+rm /var/lib/postgresql/15/main/pg_wal/archive_status/*.ready 2>/dev/null
+rm /var/lib/postgresql/15/main/pg_wal/archive_status/*.done 2>/dev/null
+```
 
 **Target: free 500 MB minimum before attempting to start the database.**
 
-If you cannot free 500 MB from safe sources, you must delete WAL segments. Read the warning below carefully before proceeding:
-
 > [!WARNING]
-> **Do not delete WAL files arbitrarily.** PostgreSQL requires a contiguous WAL chain to start. Deleting random files will corrupt the database and convert a recoverable disk-full incident into a data loss incident. If you are not certain which WAL files are oldest, do not delete any. Free space from another source.
+> **Do not delete WAL files arbitrarily.** PostgreSQL requires a contiguous WAL chain to start. Deleting random files will corrupt the database and convert a recoverable disk-full incident into a data loss incident. If you are not certain which WAL files are oldest, do not delete any. Free space from another source first.
 
 **If you must delete WAL segments (last resort):**
 
-WAL files are named with hex LSN values. Lower hex = older. Open `pg_wal` in WizTree. Sort by name. The files with the lowest hex names (e.g., `000000010000000000000001`) are the oldest. Delete 30–32 files from the lowest end to free approximately 500 MB (each WAL segment is 16 MB by default).
+WAL files are named with hex LSN values — lower hex = older. Deleting from the oldest end minimizes risk.
+
+```bash
+# Linux/macOS — list WAL files sorted oldest-first (lowest name = oldest)
+ls /var/lib/postgresql/15/main/pg_wal/ | grep -v '\.history\|archive_status' | sort | head -35
+
+# Each WAL segment is 16 MB by default.
+# Deleting 32 files frees ~500 MB.
+# Delete the oldest 32 — adjust the count to your situation:
+ls /var/lib/postgresql/15/main/pg_wal/ | grep -v '\.history\|archive_status' | \
+  sort | head -32 | xargs -I{} rm /var/lib/postgresql/15/main/pg_wal/{}
+```
+
+```powershell
+# Windows — list WAL files oldest-first
+Get-ChildItem "C:\Program Files\PostgreSQL\15\data\pg_wal" -File |
+  Where-Object { $_.Name -notmatch '\.history$' } |
+  Sort-Object Name | Select-Object -First 32 | Select-Object Name, Length
+# Review the list, then delete:
+# Get-ChildItem ... | Sort-Object Name | Select-Object -First 32 | Remove-Item
+```
 
 Keep a list of what you deleted. Add it to the post-mortem.
 
 ---
 
-## Step 2 — Start the database via `pg_ctl` (not Windows Services)
+## Step 2 — Start the database (watch live output)
 
-When PostgreSQL starts via the Windows service, startup output goes to the Event Log and you cannot see errors in real time. Starting via `pg_ctl` in a CMD window lets you watch the log live.
+Starting via `pg_ctl` or equivalent — not through the service manager — lets you watch startup errors in real time.
 
-**Open CMD as Administrator. Run:**
+**Linux / macOS:**
 
-```cmd
-"C:\Program Files\PostgreSQL\15\bin\pg_ctl.exe" start -D "C:\Program Files\PostgreSQL\15\data" -l "C:\pg_startup_log.txt"
+```bash
+# As the postgres OS user:
+sudo -u postgres pg_ctl start \
+  -D /var/lib/postgresql/15/main \
+  -l /tmp/pg_startup.log
+
+# Watch the log live in a second terminal:
+tail -f /tmp/pg_startup.log
+
+# Alternative: start and check journal (systemd)
+sudo systemctl start postgresql@15-main
+journalctl -u postgresql@15-main -f --no-pager
 ```
 
-Adjust the path to match your PostgreSQL version and data directory.
-
-**In a second CMD window, watch the log:**
+**Windows:**
 
 ```cmd
-powershell -Command "Get-Content 'C:\pg_startup_log.txt' -Wait"
+"C:\Program Files\PostgreSQL\15\bin\pg_ctl.exe" start ^
+  -D "C:\Program Files\PostgreSQL\15\data" ^
+  -l "C:\pg_startup_log.txt"
+```
+
+```powershell
+# Watch log live in a second window:
+Get-Content "C:\pg_startup_log.txt" -Wait
 ```
 
 **Expected output on successful start:**
 
 ```
-LOG:  database system was shut down at 2025-03-14 09:23:41 BRT
-LOG:  entering standby mode
-LOG:  database system is ready to accept read-only connections
-```
-or for a primary:
-```
+LOG:  database system was shut down at 2025-03-14 09:23:41 UTC
 LOG:  database system is ready to accept connections
 ```
 
@@ -111,23 +174,22 @@ LOG:  database system is ready to accept connections
 ```
 FATAL:  could not write to file "pg_wal/...": No space left on device
 ```
-Not enough space was freed. Go back to Step 1 and free more space.
+Not enough space was freed. Go back to Step 1.
 
 **If the log shows:**
 ```
 FATAL:  invalid data in file "pg_wal/..."
 ```
-A WAL file was corrupted (possibly during the WAL deletion step). Stop here. This is now a different incident. See [`diagnosis/corruption.md`](../diagnosis/corruption.md) and escalate via [`escalation/protocol.md`](../escalation/protocol.md).
+A WAL file is corrupted. Stop here. See [`diagnosis/corruption.md`](../diagnosis/corruption.md) and escalate via [`escalation/protocol.md`](../escalation/protocol.md).
 
 ---
 
 ## Step 3 — Identify and drop the orphaned slot
 
-Once the database is running, connect and run:
+Once the database is running:
 
 ```sql
--- Identifies the orphaned slot. The culprit will have active = false
--- and the largest retained_wal value.
+-- The orphaned slot will have active = false and the largest retained_wal.
 SELECT slot_name, plugin, slot_type, database, active,
        pg_size_pretty(
            pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)
@@ -136,66 +198,66 @@ FROM pg_replication_slots
 ORDER BY pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) DESC;
 ```
 
-Note the `slot_name` of the orphaned slot.
+Note the `slot_name`. **Before dropping, confirm with the client or team:**
 
-**Before dropping, confirm with the client:**
-
-"I'm about to drop the replication slot named `[slot_name]`. This will allow PostgreSQL to clean up the retained WAL and restore normal disk usage. If this slot was actively being used by a running replication consumer, that consumer will need to be reconfigured and resynced from scratch. Can you confirm this slot is no longer in use?"
-
-Wait for confirmation before proceeding.
+> "I'm about to drop the replication slot `[slot_name]`. This allows PostgreSQL to reclaim the retained WAL. If this slot is still in use by a replication consumer, that consumer will need a full resync. Please confirm it's safe to drop."
 
 ```sql
--- Drop the orphaned slot.
--- Replace 'slot_name_here' with the actual slot name from the query above.
+-- Drop the slot. Replace 'slot_name_here' with the actual name.
 SELECT pg_drop_replication_slot('slot_name_here');
 ```
 
-**Immediately verify WAL cleanup has begun:**
+**Verify WAL reclamation has begun:**
 
 ```sql
--- Run this query, wait 60 seconds, run it again.
--- The total_wal_size should be decreasing as PostgreSQL reclaims WAL segments.
+-- Run this, wait 60 seconds, run again — size should be decreasing.
 SELECT pg_size_pretty(sum(size)) AS total_wal_size,
        count(*) AS segment_count
 FROM pg_ls_waldir();
 ```
 
-You should see the size decreasing within 60 seconds as the checkpoint process reclaims old WAL segments.
+You should see the size drop within 60 seconds as the checkpoint process reclaims old segments.
 
 ---
 
 ## Step 4 — Verify full recovery
 
-1. Wait 5 minutes. Re-run the `pg_ls_waldir()` size check. On a non-replicated database, expect this to settle under 1 GB.
-2. Confirm clients can connect and run queries: `psql -c "SELECT 1"`
-3. Check `pg_stat_replication` — confirm no remaining active replication consumers depended on the dropped slot.
-4. Stop the `pg_ctl` process (Ctrl+C in the first CMD window).
-5. Start the database via Windows Services (normal startup path):
+1. Wait 5 minutes. Re-run the `pg_ls_waldir()` size check. Expect under 1 GB for a non-replicated database.
+2. Confirm clients can connect: `psql -c "SELECT 1"`
+3. Check `pg_stat_replication` — confirm no remaining consumers depended on the dropped slot.
+4. Return the database to normal service management:
 
-```powershell
-Start-Service -Name "postgresql-x64-15"  # adjust service name for your version
+```bash
+# Linux — hand back to systemd
+sudo -u postgres pg_ctl stop -D /var/lib/postgresql/15/main
+sudo systemctl start postgresql@15-main
+systemctl status postgresql@15-main
 ```
 
-6. Run a `VACUUM` on the most active tables to ensure autovacuum catches up:
+```powershell
+# Windows — stop pg_ctl process (Ctrl+C), then start via Services
+Start-Service -Name "postgresql-x64-15"
+```
+
+5. Run VACUUM on the most active tables:
 
 ```sql
--- Run VACUUM on the tables with the most activity.
--- Identifies candidates: tables with the most dead tuples accumulated.
+-- Find tables with the most accumulated dead tuples after the outage.
 SELECT schemaname, relname AS table_name, n_dead_tup, last_autovacuum
 FROM pg_stat_user_tables
 ORDER BY n_dead_tup DESC
 LIMIT 10;
+-- Then: VACUUM ANALYZE <table_name>;
 ```
 
 ---
 
 ## Preventive Measures
 
-**Monitor inactive slots as part of your daily health check:**
+**Monitor inactive slots — add to your daily health check:**
 
 ```sql
 -- Alert if any inactive slot retains more than 5 GB.
--- Add this to your monitoring schedule.
 SELECT slot_name, active,
        pg_size_pretty(
            pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)
@@ -205,27 +267,32 @@ WHERE NOT active
   AND pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) > 5 * 1024 * 1024 * 1024;
 ```
 
-**Limit the number of replication slots:**
+**Disk free space alert:**
+
+```bash
+# Linux — add to cron or monitoring system
+# Alert when pg_wal partition is below 20% free
+df -h /var/lib/postgresql/15/main/pg_wal
+```
+
+Set the alert threshold at **20% remaining** on the PostgreSQL data volume. On a system generating 2 GB of WAL per day, 20% gives you several days to respond.
+
+**Limit replication slots:**
 
 ```sql
--- Check current setting.
-SHOW max_replication_slots;
-
--- Set to the minimum number you actually use. This forces cleanup discipline.
+-- Minimum slots you actually use. Prevents accumulation of forgotten slots.
 -- Requires restart.
 ALTER SYSTEM SET max_replication_slots = 5;
 ```
 
-**Set max_slot_wal_keep_size (PostgreSQL 13+):**
+**Set `max_slot_wal_keep_size` (PostgreSQL 13+):**
 
-This limits how much WAL a single slot can retain before being automatically invalidated. Important: when the limit is hit, the slot is not paused — it is **invalidated** (`invalidation_reason = 'wal_removed'`). The subscriber can no longer resume from where it left off. Physical standbys need a full `pg_basebackup`; logical subscribers need the subscription recreated. This is acceptable as a safety valve to prevent disk exhaustion, but it is not a substitute for the monitoring query above.
+This limits how much WAL a single slot can retain before being automatically invalidated. When the limit is hit, the slot is **invalidated** (`invalidation_reason = 'wal_removed'`) — not paused. The subscriber can no longer resume and must be fully resynced (physical standbys need `pg_basebackup` again; logical subscribers need subscription recreation). Use this as a safety valve, not a substitute for monitoring.
 
 ```sql
 ALTER SYSTEM SET max_slot_wal_keep_size = '10GB';
 SELECT pg_reload_conf();
 ```
-
-**Disk free space alert:** set an alert at 20% remaining free space on the PostgreSQL data volume. On a system generating 2 GB of WAL per day, 20% gives you several days to respond.
 
 ---
 
@@ -234,4 +301,4 @@ SELECT pg_reload_conf();
 - How orphaned slots are discovered during lag monitoring: [`diagnosis/replication-lag.md`](../diagnosis/replication-lag.md)
 - How to communicate during this recovery: [`communication/nvc-incident-communication.md`](../communication/nvc-incident-communication.md)
 - Post-mortem template: [`post-mortem/template.md`](../post-mortem/template.md)
-- Worked example of this incident as a post-mortem: [`post-mortem/example-pg-wal-incident.md`](../post-mortem/example-pg-wal-incident.md)
+- Worked example post-mortem for this incident: [`post-mortem/example-pg-wal-incident.md`](../post-mortem/example-pg-wal-incident.md)

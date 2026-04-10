@@ -2,10 +2,8 @@
 
 Start here when an incident is reported. Follow the decision nodes in sequence. Each leaf node points to a diagnosis checklist or runbook. You should reach an initial hypothesis within 5 minutes.
 
-During a P1, log every decision node you traverse with a timestamp in the incident ticket. This feeds directly into the post-mortem timeline.
-
 > [!NOTE]
-> Every decision branch you follow during a P1 must be recorded with a timestamp. "14:38 — confirmed process running, checked connections" is enough. This is not bureaucracy — it's the raw material for the post-mortem timeline.
+> During a P1, log every decision node you traverse with a timestamp in the incident ticket. "14:38 — confirmed process running, checked connections" is enough. This feeds directly into the post-mortem timeline.
 
 ---
 
@@ -15,40 +13,40 @@ During a P1, log every decision node you traverse with a timestamp in the incide
 flowchart TD
     A([Incident reported]) --> B{Is the PostgreSQL\nprocess running?}
 
-    B -- "Check: pg_ctl status\nor Windows Services" --> C{Process running?}
+    B --> C[Check: pg_ctl status\nor systemctl / Windows Services]
+    C --> D{Process running?}
 
-    C -- No --> D[Check last 50 lines\nof PostgreSQL log]
-    C -- Yes --> E{Can clients connect?\npsql -c 'SELECT 1'}
+    D -- No --> E[Check last 50 lines\nof PostgreSQL log]
+    D -- Yes --> F{Can clients connect?\nRun: psql -c 'SELECT 1'}
 
-    D --> F{Log contains\n'no space left on device'\nor 'could not open file'?}
-    F -- Yes --> G[[Runbook: pg-wal-zero-bytes-free\nsee runbooks/pg-wal-zero-bytes-free.md]]:::critical
-    F -- No --> H[General crash recovery:\ncheck PostgreSQL log for FATAL/PANIC\ncheck Windows Event Log]
+    E --> G{Log contains\n'no space left on device'\nor 'could not open file'?}
+    G -- Yes --> H[[WAL runbook\nrunbooks/pg-wal-zero-bytes-free.md]]:::critical
+    G -- No --> I[Check log for FATAL or PANIC\nCheck OS event log\nGeneral crash recovery path]
 
-    E -- No --> I{Connection refused\nor authentication error?}
-    E -- Yes --> J{Are queries completing\nin reasonable time?}
+    F -- No --> J{Connection refused\nor auth error?}
+    F -- Yes --> K{Queries completing\nin reasonable time?}
 
-    I -- "Connection refused" --> K{Check max_connections:\nSELECT count\nFROM pg_stat_activity}
-    I -- "Auth error" --> L[Check pg_hba.conf:\nauth method mismatch\nSCRAM vs MD5 issue\nsee escalation/protocol.md]
+    J -- Connection refused --> L{Count near\nmax_connections?}
+    J -- Auth error --> M[[Auth failure checklist\ndiagnosis/auth-failure.md]]:::checklist
 
-    K --> M{count near\nmax_connections?}
-    M -- Yes --> N[[Checklist: Connection Exhaustion\nsee diagnosis/connection-exhaustion.md]]:::checklist
-    M -- No --> O[Check listening socket\nnetstat -ano port 5432\ncheck pg_hba.conf\ncheck TLS registry]
+    L -- Yes --> N[[Connection exhaustion\ndiagnosis/connection-exhaustion.md]]:::checklist
+    L -- No --> O[Check listening socket\nnetstat / ss -tlnp\nCheck pg_hba.conf\nCheck TLS config]
 
-    J -- No --> P{Queries hanging\nor returning errors?}
-    J -- Yes --> Q{Check replication:\npg_stat_replication\npg_replication_slots}
+    K -- No --> P{Queries hanging\nor returning errors?}
+    K -- Yes --> Q[Check replication\npg_stat_replication\npg_replication_slots]
 
-    P -- Hanging --> R[[Checklist: Lock Contention\nsee diagnosis/lock-contention.md]]:::checklist
+    P -- Hanging --> R[[Lock contention\ndiagnosis/lock-contention.md]]:::checklist
     P -- Errors --> S{Errors mention\ncorruption or\nchecksum failure?}
 
-    S -- Yes --> T[[Checklist: Corruption\nsee diagnosis/corruption.md]]:::critical
+    S -- Yes --> T[[Corruption triage\ndiagnosis/corruption.md]]:::critical
     S -- No --> U[Check pg_stat_activity\nfor long-running queries\nor idle-in-transaction]
 
-    Q --> V{Replication lag\nor inactive slot\nwith large retained WAL?}
-    V -- Yes --> W[[Checklist: Replication Lag\nsee diagnosis/replication-lag.md]]:::checklist
-    V -- No --> X[Database healthy.\nVerify client-side issue:\nconnection string, credentials,\napplication config]
+    Q --> V{Replication lag or\ninactive slot with\nlarge retained WAL?}
+    V -- Yes --> W[[Replication lag\ndiagnosis/replication-lag.md]]:::checklist
+    V -- No --> X([Database healthy.\nVerify client-side:\nconnection string,\napplication config])
 
     classDef critical fill:#c0392b,color:#fff,stroke:#922b21
-    classDef checklist fill:#2471a3,color:#fff,stroke:#1a5276
+    classDef checklist fill:#1a5276,color:#fff,stroke:#154360
 ```
 
 ---
@@ -57,43 +55,66 @@ flowchart TD
 
 | Symbol | Meaning |
 |---|---|
-| Rounded rectangle | Start / End point |
-| Diamond `{ }` | Decision node — requires a check |
+| Rounded rectangle | Start / End |
+| Diamond | Decision — requires a check |
 | Rectangle | Action to perform |
-| `[[ ]]` Red | Runbook or checklist — critical path |
+| `[[ ]]` Red | Critical path — runbook or corruption |
 | `[[ ]]` Blue | Diagnosis checklist |
 
 ---
 
-## First checks reference
-
-When you reach a decision node, these are the exact commands to run:
+## First Checks Reference
 
 **Is the process running?**
+
+```bash
+# Linux — systemd
+systemctl status postgresql
+systemctl status postgresql@15-main   # Debian/Ubuntu naming
+
+# Linux — pg_ctl
+pg_ctl status -D /var/lib/postgresql/15/main
+
+# macOS — Homebrew
+brew services info postgresql@15
+```
+
 ```powershell
-# Windows — check service state
+# Windows — Services
 Get-Service -Name "postgresql*" | Select-Object Name, Status
 
-# Or via pg_ctl (replace path with your installation)
+# Windows — pg_ctl
 & "C:\Program Files\PostgreSQL\15\bin\pg_ctl.exe" status -D "C:\Program Files\PostgreSQL\15\data"
 ```
 
 **Can clients connect?**
+
 ```bash
 psql -h localhost -p 5432 -U postgres -c "SELECT 1"
 ```
 
 **Connection count vs limit:**
+
 ```sql
--- Returns: current connections / max_connections setting
+-- Returns current connections / max_connections.
+-- If pct_used is above 90%, connection exhaustion is the likely cause.
 SELECT count(*) AS current_connections,
-       (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max_connections
+       (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max_connections,
+       round(100.0 * count(*) /
+         (SELECT setting::int FROM pg_settings WHERE name = 'max_connections'), 1) AS pct_used
 FROM pg_stat_activity;
 ```
 
 **Check PostgreSQL log (last 50 lines):**
+
+```bash
+# Linux — typical log locations
+tail -50 /var/log/postgresql/postgresql-15-main.log
+journalctl -u postgresql --no-pager -n 50
+```
+
 ```powershell
-# Replace with your actual log path
+# Windows
 Get-Content "C:\Program Files\PostgreSQL\15\data\log\postgresql-*.log" -Tail 50
 ```
 

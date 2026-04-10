@@ -1,6 +1,7 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![ITIL-aligned](https://img.shields.io/badge/ITIL-aligned-blue)
 ![NVC-integrated](https://img.shields.io/badge/NVC-integrated-purple)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
 # incident-response-runbook
 
@@ -31,11 +32,13 @@ This runbook addresses all three.
 | [`diagnosis/connection-exhaustion.md`](diagnosis/connection-exhaustion.md) | Diagnosis | Step-by-step diagnosis for max_connections exhaustion |
 | [`diagnosis/replication-lag.md`](diagnosis/replication-lag.md) | Diagnosis | Replication lag, orphaned slot detection, WAL retention monitoring |
 | [`diagnosis/lock-contention.md`](diagnosis/lock-contention.md) | Diagnosis | Lock wait chain visualization, deadlock diagnosis, emergency unlock |
+| [`diagnosis/auth-failure.md`](diagnosis/auth-failure.md) | Diagnosis | Authentication failures: SCRAM/MD5 mismatch, pg_hba.conf rules, peer auth, TLS |
 | [`diagnosis/corruption.md`](diagnosis/corruption.md) | Diagnosis | Initial corruption triage — symptoms, verification queries, escalation |
-| ★ [`runbooks/pg-wal-zero-bytes-free.md`](runbooks/pg-wal-zero-bytes-free.md) | Runbook | Full step-by-step recovery for pg_wal disk exhaustion from orphaned slots |
+| ★ [`runbooks/pg-wal-zero-bytes-free.md`](runbooks/pg-wal-zero-bytes-free.md) | Runbook | Full step-by-step recovery for pg_wal disk exhaustion (Linux, macOS, Windows) |
 | ★ [`communication/nvc-incident-communication.md`](communication/nvc-incident-communication.md) | Communication | NVC four-step framework applied to incident communication |
 | [`post-mortem/template.md`](post-mortem/template.md) | Post-mortem | Reusable template with 5-whys, communication review, corrective/preventive actions |
-| [`post-mortem/example-pg-wal-incident.md`](post-mortem/example-pg-wal-incident.md) | Post-mortem | Fully worked example post-mortem from a real WAL disk exhaustion incident |
+| [`post-mortem/example-pg-wal-incident.md`](post-mortem/example-pg-wal-incident.md) | Post-mortem | Worked example: WAL disk exhaustion from orphaned replication slot |
+| [`post-mortem/example-connection-exhaustion.md`](post-mortem/example-connection-exhaustion.md) | Post-mortem | Worked example: connection pool exhaustion from ORM transaction leak |
 | [`escalation/protocol.md`](escalation/protocol.md) | Escalation | When to escalate, what to prepare, escalation matrix, client management |
 | [`war-room/etiquette.md`](war-room/etiquette.md) | War room | Roles, the three rules, time-boxing decisions, post-war-room capture |
 
@@ -53,17 +56,23 @@ This runbook addresses all three.
 
 ---
 
+## Platform Support
+
+All runbooks and checklists include commands for **Linux**, **macOS**, and **Windows**. The SQL queries are platform-independent — they run against any PostgreSQL instance regardless of OS.
+
+The auth failure diagnosis covers the SCRAM-SHA-256 / MD5 mismatch that affects every PostgreSQL 14+ upgrade. The WAL runbook covers `pg_ctl`, `systemctl`, and Windows Services. The triage flowchart includes `journalctl`, `tail`, `Get-Content`, and `sc query` equivalents.
+
+---
+
 ## The NVC Angle
 
 Nonviolent Communication (NVC) was developed by Marshall Rosenberg and published in *Nonviolent Communication: A Language of Life* (1999). It was designed for conflict resolution. Its four-step structure — Observation, Feeling, Need, Request — maps almost exactly onto what incident communication requires.
 
 NVC is not soft skills appended to a technical process. It is a precision tool that eliminates the most expensive failure mode in incident response: miscommunication under stress.
 
-Consider the structural parallel. In conflict resolution, two people have different perceptions of the same event and are generating evaluations about each other's motives. In incident response, an engineer and a client have different information about the same system failure and are generating evaluations about whose fault it is. The failure mode is identical — evaluation masquerading as observation, leading to defensive communication, leading to a loop that consumes time without producing information.
+The structural parallel is direct. In conflict resolution, two people have different perceptions of the same event. In incident response, an engineer and a client have different information about the same system failure. The failure mode is identical — evaluation masquerading as observation, leading to defensive communication, leading to a loop that consumes time without producing information.
 
-The NVC four-step structure breaks this loop at the first step. An engineer who can stay in observation language under pressure — "the database has been unreachable for 12 minutes since the 14:30 deployment" rather than "the database is broken" — has already made the next 30 minutes more productive than they would have been otherwise.
-
-These procedures are distilled from production incidents across 500+ PostgreSQL deployments. The NVC integration came from noticing that the fastest resolutions always had one thing in common: someone in the room was asking "what do you need?" instead of "whose fault is this?"
+The NVC four-step structure breaks this loop at the first step. An engineer who stays in observation language under pressure — "the database has been unreachable for 12 minutes since the 14:30 deployment" rather than "the database is broken" — has already made the next 30 minutes more productive than they would have been otherwise.
 
 ---
 
@@ -79,6 +88,7 @@ incident-response-runbook/
     connection-exhaustion.md
     replication-lag.md
     lock-contention.md
+    auth-failure.md
     corruption.md
   runbooks/
     pg-wal-zero-bytes-free.md
@@ -87,10 +97,12 @@ incident-response-runbook/
   post-mortem/
     template.md
     example-pg-wal-incident.md
+    example-connection-exhaustion.md
   escalation/
     protocol.md
   war-room/
     etiquette.md
+  LICENSE
   README.md
 ```
 
@@ -98,4 +110,4 @@ incident-response-runbook/
 
 ## License
 
-MIT — use freely, adapt as needed.
+MIT — see [LICENSE](LICENSE).
