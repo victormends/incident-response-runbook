@@ -7,6 +7,8 @@
 
 A production-grade incident response framework for PostgreSQL environments that treats communication failure as a first-class technical problem.
 
+This repository is a reusable public runbook template. It is not emergency support, legal advice, vendor documentation, or a replacement for your organization's incident commander, backup policy, and escalation procedures.
+
 ---
 
 ## The Problem This Solves
@@ -54,6 +56,8 @@ This runbook addresses all three.
 
 **Step 3:** Read [`communication/nvc-incident-communication.md`](communication/nvc-incident-communication.md) before your next P1. Specifically, memorize the de-escalation script. The 90 seconds after you pick up a client's P1 call determine whether the next hour goes well or poorly. That script is the most immediately useful artifact in this repo.
 
+**Step 4:** Adapt every SLA, role name, contact path, and escalation threshold before using this in a real environment. The examples are intentionally generic; production incident response must match your team's authority model, data-retention rules, and recovery objectives.
+
 ---
 
 ## Platform Support
@@ -61,6 +65,20 @@ This runbook addresses all three.
 All runbooks and checklists include commands for **Linux**, **macOS**, and **Windows**. The SQL queries are platform-independent — they run against any PostgreSQL instance regardless of OS.
 
 The auth failure diagnosis covers the SCRAM-SHA-256 / MD5 mismatch that affects every PostgreSQL 14+ upgrade. The WAL runbook covers `pg_ctl`, `systemctl`, and Windows Services. The triage flowchart includes `journalctl`, `tail`, `Get-Content`, and `sc query` equivalents.
+
+---
+
+## Operational Safety
+
+Use this material as a checklist and communication scaffold, not as a blind procedure. Before applying a recovery step in production, confirm:
+
+- backups and restore points are understood;
+- the incident commander or owner has approved destructive or service-impacting action;
+- the commands match your PostgreSQL version, service manager, and operating system;
+- client-facing updates are factual, timestamped, and do not speculate beyond verified evidence;
+- post-mortem actions have owners and review dates.
+
+See [`SECURITY.md`](SECURITY.md) for reporting guidance and safety boundaries.
 
 ---
 
@@ -102,9 +120,22 @@ incident-response-runbook/
     protocol.md
   war-room/
     etiquette.md
+  SECURITY.md
   LICENSE
   README.md
 ```
+
+---
+
+## Public Release Checklist
+
+Before tagging a public baseline, verify:
+
+- README links resolve;
+- flagship runbooks are generic and do not contain private client names, internal hostnames, or credentials;
+- commands are presented as examples and include platform context;
+- destructive or irreversible actions are explicitly escalated, not normalized;
+- post-mortem examples remain synthetic and do not identify real incidents.
 
 ---
 
