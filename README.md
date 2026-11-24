@@ -5,7 +5,7 @@
 
 # incident-response-runbook
 
-A production-grade incident response framework for PostgreSQL environments that treats communication failure as a first-class technical problem.
+An operational incident response framework for PostgreSQL and cloud infrastructure environments that treats communication failure as a first-class technical problem.
 
 This repository is a reusable public runbook template. It is not emergency support, legal advice, vendor documentation, or a replacement for your organization's incident commander, backup policy, and escalation procedures.
 
@@ -37,6 +37,9 @@ This runbook addresses all three.
 | [`diagnosis/auth-failure.md`](diagnosis/auth-failure.md) | Diagnosis | Authentication failures: SCRAM/MD5 mismatch, pg_hba.conf rules, peer auth, TLS |
 | [`diagnosis/corruption.md`](diagnosis/corruption.md) | Diagnosis | Initial corruption triage — symptoms, verification queries, escalation |
 | ★ [`runbooks/pg-wal-zero-bytes-free.md`](runbooks/pg-wal-zero-bytes-free.md) | Runbook | Full step-by-step recovery for pg_wal disk exhaustion (Linux, macOS, Windows) |
+| ★ [`runbooks/aurora-mysql-writer-saturation.md`](runbooks/aurora-mysql-writer-saturation.md) | Runbook | Triage and safe mitigation for Aurora MySQL writer CPU and connection saturation |
+| [`runbooks/eks-spot-single-node-spof.md`](runbooks/eks-spot-single-node-spof.md) | Runbook | Recovery and GitOps topology spread fix for EKS Spot single-node SPOF outages |
+| [`runbooks/systemd-boot-race-and-watchdog.md`](runbooks/systemd-boot-race-and-watchdog.md) | Runbook | Diagnosing Linux systemd network boot races, OnFailure hooks, and deadman watchdogs |
 | ★ [`communication/nvc-incident-communication.md`](communication/nvc-incident-communication.md) | Communication | NVC four-step framework applied to incident communication |
 | [`post-mortem/template.md`](post-mortem/template.md) | Post-mortem | Reusable template with 5-whys, communication review, corrective/preventive actions |
 | [`post-mortem/example-pg-wal-incident.md`](post-mortem/example-pg-wal-incident.md) | Post-mortem | Worked example: WAL disk exhaustion from orphaned replication slot |
@@ -110,6 +113,9 @@ incident-response-runbook/
     corruption.md
   runbooks/
     pg-wal-zero-bytes-free.md
+    aurora-mysql-writer-saturation.md
+    eks-spot-single-node-spof.md
+    systemd-boot-race-and-watchdog.md
   communication/
     nvc-incident-communication.md
   post-mortem/
@@ -120,9 +126,21 @@ incident-response-runbook/
     protocol.md
   war-room/
     etiquette.md
+  scripts/
+    validate_runbook_repo.py
   SECURITY.md
   LICENSE
   README.md
+```
+
+---
+
+## Automated Validation
+
+CI validates relative Markdown links, fenced code blocks, README index coverage, and public sanitization rules on every push:
+
+```bash
+python scripts/validate_runbook_repo.py
 ```
 
 ---
