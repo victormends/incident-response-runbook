@@ -40,7 +40,7 @@ kubectl describe node <draining-node-name>
 
 ---
 
-## Step 1 — Immediate Mitigation (Restore Availability)
+## Step 1: Immediate Mitigation (Restore Availability)
 
 1. **If pods are stuck `Pending` after Spot reclamation:**
    - Read `Events` in `kubectl describe pod` for node affinity mismatch, missing AZ volume affinity, or Karpenter provisioning quota limits.
@@ -60,7 +60,7 @@ kubectl describe node <draining-node-name>
 
 ---
 
-## Step 2 — Durable GitOps Fix (Eliminate Single-Node SPOF)
+## Step 2: Durable GitOps Fix (Eliminate Single-Node SPOF)
 
 Update the service Deployment (or Helm values) in GitOps so Kubernetes refuses to pack critical replicas onto one host:
 

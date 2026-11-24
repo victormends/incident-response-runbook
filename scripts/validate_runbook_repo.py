@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 import sys
@@ -11,15 +12,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 
-FORBIDDEN_LITERALS: List[str] = [
-    "monest",
-    "pedroso",
-    "girafa",
-    "jornalocomercio",
-    "vvale",
-    "pocket fm",
-    "belvo",
-]
+
+def get_extra_blocklist() -> List[str]:
+    raw = os.environ.get("RUNBOOK_EXTRA_BLOCKLIST", "")
+    return [term.strip().lower() for term in raw.split(",") if term.strip()]
+
 
 SECRET_PATTERNS: List[re.Pattern] = [
     re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -37,12 +34,12 @@ def iter_markdown_files(root: Path) -> List[Path]:
     )
 
 
-def validate_file(path: Path, root: Path, errors: List[str]) -> Set[str]:
+def validate_file(path: Path, root: Path, errors: List[str], extra_blocklist: List[str]) -> Set[str]:
     text = path.read_text(encoding="utf-8")
     lowered = text.lower()
     rel = path.relative_to(root).as_posix()
 
-    for term in FORBIDDEN_LITERALS:
+    for term in extra_blocklist:
         if re.search(rf"\b{re.escape(term)}\b", lowered):
             errors.append(f"{rel}: forbidden non-sanitized term '{term}' found")
 
@@ -89,9 +86,10 @@ def main() -> int:
 
     readme_path = ROOT / "README.md"
     readme_refs: Set[str] = set()
+    extra_blocklist = get_extra_blocklist()
 
     for md in md_files:
-        refs = validate_file(md, ROOT, errors)
+        refs = validate_file(md, ROOT, errors, extra_blocklist)
         if md == readme_path:
             readme_refs = refs
 

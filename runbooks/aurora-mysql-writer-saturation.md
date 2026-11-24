@@ -53,7 +53,7 @@ ORDER BY conn_count DESC;
 
 ---
 
-## Step 1 — Immediate Mitigation (5 to 10 minutes)
+## Step 1: Immediate Mitigation (5 to 10 minutes)
 
 Choose the mitigation matching the dominant signature in `SHOW FULL PROCESSLIST` and Performance Insights:
 
@@ -80,7 +80,7 @@ Choose the mitigation matching the dominant signature in `SHOW FULL PROCESSLIST`
 
 ---
 
-## Step 2 — Verification of Recovery
+## Step 2: Verification of Recovery
 
 Confirm all four signals return to baseline for at least 5 consecutive minutes:
 
@@ -91,7 +91,7 @@ Confirm all four signals return to baseline for at least 5 consecutive minutes:
 
 ---
 
-## Step 3 — Durable Fix (Post-Incident Actions)
+## Step 3: Durable Fix (Post-Incident Actions)
 
 - Batch background `INSERT`/`UPDATE` workloads (e.g., 100 to 1,000 rows per transaction or staged upsert) instead of single-row `autocommit` loops.
 - Enforce per-service connection pool upper bounds (`pool_size` + `max_overflow`) sized against total `max_connections` across max pod count.

@@ -19,52 +19,47 @@ If this returns rows, proceed with the steps below.
 
 ---
 
-## Step 1 — Visualize the lock wait chain
+## Step 1: Visualize the lock wait chain
 
-This query shows the full blocking chain: who is blocking whom, and what the blocking session is doing.
+This query shows active blocking pairs (who is blocking whom, and what the blocking session is doing), adapted from the **PostgreSQL Wiki (`Lock_Monitoring`)** guide.
+
+Using PostgreSQL 9.6+ `pg_blocking_pids(blocked.pid)` captures **relation, tuple, advisory, and `transactionid` locks** in a single query without missing non-transaction locks:
 
 ```sql
--- Returns the lock wait chain. Each row shows a blocked session and its blocker.
--- blocker_pid: the session holding the lock
+-- Adapted from PostgreSQL Wiki (Lock_Monitoring) using pg_blocking_pids() (PostgreSQL 9.6+).
+-- Captures relation, tuple, advisory, and transactionid lock waits.
+-- blocker_pid: a session holding a conflicting lock
 -- blocked_pid: the session waiting for it
--- blocker_query: what the blocking session last ran (may be empty if it's idle-in-transaction)
--- Copy-paste safe — no modifications needed for standard PostgreSQL.
-WITH RECURSIVE lock_chain AS (
-    SELECT
-        blocked.pid AS blocked_pid,
-        blocked.usename AS blocked_user,
-        blocked.query AS blocked_query,
-        blocker.pid AS blocker_pid,
-        blocker.usename AS blocker_user,
-        blocker.query AS blocker_query,
-        blocker.state AS blocker_state,
-        now() - blocked.query_start AS wait_duration
-    FROM pg_stat_activity blocked
-    JOIN pg_locks blocked_locks ON blocked.pid = blocked_locks.pid
-    JOIN pg_locks blocker_locks ON blocked_locks.transactionid = blocker_locks.transactionid
-                                AND blocker_locks.granted = true
-                                AND blocked_locks.granted = false
-    JOIN pg_stat_activity blocker ON blocker_locks.pid = blocker.pid
-    WHERE NOT blocked.pid = blocker.pid
-)
-SELECT blocker_pid, blocker_user, blocker_state,
-       blocked_pid, blocked_user,
-       wait_duration,
-       left(blocker_query, 120) AS blocker_last_query,
-       left(blocked_query, 120) AS blocked_query
-FROM lock_chain
+-- blocker_last_query: what the blocking session last ran (may be empty or stale if idle-in-transaction)
+-- Copy-paste safe (no modifications needed for standard PostgreSQL 9.6+).
+SELECT
+    blocker.pid AS blocker_pid,
+    blocker.usename AS blocker_user,
+    blocker.state AS blocker_state,
+    blocked.pid AS blocked_pid,
+    blocked.usename AS blocked_user,
+    now() - blocked.query_start AS wait_duration,
+    left(blocker.query, 120) AS blocker_last_query,
+    left(blocked.query, 120) AS blocked_query
+FROM pg_stat_activity blocked
+CROSS JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) AS blocker_pid
+JOIN pg_stat_activity blocker ON blocker.pid = blocker_pid
+WHERE blocked.wait_event_type = 'Lock'
 ORDER BY wait_duration DESC;
 ```
 
+> [!NOTE]
+> For legacy PostgreSQL versions older than 9.6 (before `pg_blocking_pids()` existed), see the **PostgreSQL Wiki (`Lock_Monitoring`)** `pg_locks` self-join query, which matches across `locktype`, `database`, `relation`, `page`, `tuple`, `virtualxid`, `transactionid`, `classid`, `objid`, and `objsubid` rather than `transactionid` alone.
+
 **Reading the output:**
 
-- `blocker_state = 'idle in transaction'` — the blocking session opened a transaction, ran a query, and stopped. It is not actively doing anything. This is almost always a leaked transaction from an application that crashed or lost its connection. Safe to terminate.
-- `blocker_state = 'active'` — the blocking session is in the middle of a long-running query. Do not terminate without understanding the operation.
-- Multiple `blocked_pid` rows with the same `blocker_pid` — a single session is blocking many others. Terminating the blocker will unblock all of them simultaneously.
+- `blocker_state = 'idle in transaction'`: the blocking session opened a transaction, ran a query, and stopped. It is not actively doing anything. This is almost always a leaked transaction from an application that crashed or lost its connection. Safe to terminate.
+- `blocker_state = 'active'`: the blocking session is in the middle of a long-running query. Do not terminate without understanding the operation.
+- Multiple `blocked_pid` rows with the same `blocker_pid`: a single session is blocking many others. Terminating the blocker will unblock all of them simultaneously.
 
 ---
 
-## Step 2 — Deadlock vs Long-Running Lock Waits
+## Step 2: Deadlock vs Long-Running Lock Waits
 
 It's critical to differentiate between a **deadlock** and a **long-running lock wait** (lock contention).
 
@@ -98,16 +93,16 @@ WHERE pid IN (12345, 11111);  -- replace with actual PIDs from the log
 
 ---
 
-## Step 3 — Emergency unlock
+## Step 3: Emergency unlock
 
 > [!WARNING]
-> Before terminating any session, confirm that it is not in the middle of a fiscal write operation. A session inserting NF-e records, processing payroll, or updating tax tables that is terminated mid-transaction will have its work rolled back — the data will be safe, but the client's operation will need to be retried. Always ask: "Is this session doing something the client needs to re-run if we terminate it?"
+> Before terminating any session, confirm that it is not in the middle of a fiscal write operation. A session inserting NF-e records, processing payroll, or updating tax tables that is terminated mid-transaction will have its work rolled back (the data will be safe, but the client's operation will need to be retried). Always ask: "Is this session doing something the client needs to re-run if we terminate it?"
 
 **Soft cancel (interrupts the current query, does not close the connection):**
 
 ```sql
 -- Sends SIGINT to the backend. The session continues to exist but the current
--- query is cancelled. Use this first — it is less disruptive than termination.
+-- query is cancelled. Use this first (it is less disruptive than termination).
 SELECT pg_cancel_backend(pid);  -- replace pid with the blocker's PID
 ```
 

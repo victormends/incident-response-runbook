@@ -11,13 +11,19 @@ This repository is a reusable public runbook template. It is not emergency suppo
 
 ---
 
+## Origin & Scope
+
+All runbooks, diagnostic checklists, and post-mortems in this repository are generic, vendor-neutral operational templates derived from field incidents, using strictly synthetic examples, placeholder identifiers, and anonymized topologies.
+
+---
+
 ## The Problem This Solves
 
 Most P1 incidents are resolved slowly for one of three reasons.
 
 The first: the technical diagnosis loop gets corrupted by emotional escalation. A client calls in a panic, the engineer feels pressured to give an answer before they have one, they guess wrong, and now 20 minutes are gone on a false hypothesis while the client grows angrier.
 
-The second: responders work from memory instead of structure. An engineer who has resolved five connection exhaustion incidents has a mental checklist. An engineer facing their second P1 at 2am does not. The difference in resolution time is not talent — it is the existence of a written path to follow.
+The second: responders work from memory instead of structure. An engineer who has resolved five connection exhaustion incidents has a mental checklist. An engineer facing their second P1 at 2am does not. The difference in resolution time is not talent: it is the existence of a written path to follow.
 
 The third: post-mortem actions get written and never reviewed. The incident closes, the corrective actions are logged in a ticket, and three months later the same class of incident recurs because the systemic cause was identified but the preventive fix was never implemented.
 
@@ -35,7 +41,7 @@ This runbook addresses all three.
 | [`diagnosis/replication-lag.md`](diagnosis/replication-lag.md) | Diagnosis | Replication lag, orphaned slot detection, WAL retention monitoring |
 | [`diagnosis/lock-contention.md`](diagnosis/lock-contention.md) | Diagnosis | Lock wait chain visualization, deadlock diagnosis, emergency unlock |
 | [`diagnosis/auth-failure.md`](diagnosis/auth-failure.md) | Diagnosis | Authentication failures: SCRAM/MD5 mismatch, pg_hba.conf rules, peer auth, TLS |
-| [`diagnosis/corruption.md`](diagnosis/corruption.md) | Diagnosis | Initial corruption triage — symptoms, verification queries, escalation |
+| [`diagnosis/corruption.md`](diagnosis/corruption.md) | Diagnosis | Initial corruption triage (symptoms, verification queries, escalation) |
 | ★ [`runbooks/pg-wal-zero-bytes-free.md`](runbooks/pg-wal-zero-bytes-free.md) | Runbook | Full step-by-step recovery for pg_wal disk exhaustion (Linux, macOS, Windows) |
 | ★ [`runbooks/aurora-mysql-writer-saturation.md`](runbooks/aurora-mysql-writer-saturation.md) | Runbook | Triage and safe mitigation for Aurora MySQL writer CPU and connection saturation |
 | [`runbooks/eks-spot-single-node-spof.md`](runbooks/eks-spot-single-node-spof.md) | Runbook | Recovery and GitOps topology spread fix for EKS Spot single-node SPOF outages |
@@ -47,7 +53,7 @@ This runbook addresses all three.
 | [`escalation/protocol.md`](escalation/protocol.md) | Escalation | When to escalate, what to prepare, escalation matrix, client management |
 | [`war-room/etiquette.md`](war-room/etiquette.md) | War room | Roles, the three rules, time-boxing decisions, post-war-room capture |
 
-★ Flagship documents — start here if you're reading this for the first time.
+★ Flagship documents: start here if you're reading this for the first time.
 
 ---
 
@@ -55,7 +61,7 @@ This runbook addresses all three.
 
 **Step 1:** Bookmark [`severity-classification/matrix.md`](severity-classification/matrix.md). When a ticket comes in, classify it before anything else. The classification determines your SLA, escalation path, and communication cadence.
 
-**Step 2:** Drill [`triage/flowchart.md`](triage/flowchart.md) until you can follow it without reading the instructions at the top. During an active P1, you need to reach an initial hypothesis within 5 minutes — the flowchart is the path.
+**Step 2:** Drill [`triage/flowchart.md`](triage/flowchart.md) until you can follow it without reading the instructions at the top. During an active P1, you need to reach an initial hypothesis within 5 minutes: the flowchart is the path.
 
 **Step 3:** Read [`communication/nvc-incident-communication.md`](communication/nvc-incident-communication.md) before your next P1. Specifically, memorize the de-escalation script. The 90 seconds after you pick up a client's P1 call determine whether the next hour goes well or poorly. That script is the most immediately useful artifact in this repo.
 
@@ -65,9 +71,9 @@ This runbook addresses all three.
 
 ## Platform Support
 
-All runbooks and checklists include commands for **Linux**, **macOS**, and **Windows**. The SQL queries are platform-independent — they run against any PostgreSQL instance regardless of OS.
+All runbooks and checklists include commands for **Linux**, **macOS**, and **Windows**. The SQL queries are platform-independent: they run against any PostgreSQL instance regardless of OS.
 
-The auth failure diagnosis covers the SCRAM-SHA-256 / MD5 mismatch that affects every PostgreSQL 14+ upgrade. The WAL runbook covers `pg_ctl`, `systemctl`, and Windows Services. The triage flowchart includes `journalctl`, `tail`, `Get-Content`, and `sc query` equivalents.
+The auth failure diagnosis covers the SCRAM-SHA-256 / MD5 mismatch commonly encountered during PostgreSQL 14+ upgrades when legacy clients still rely on MD5 hashes. The WAL runbook covers `pg_ctl`, `systemctl`, and Windows Services. The triage flowchart includes `journalctl`, `tail`, `Get-Content`, and `sc query` equivalents.
 
 ---
 
@@ -87,13 +93,13 @@ See [`SECURITY.md`](SECURITY.md) for reporting guidance and safety boundaries.
 
 ## The NVC Angle
 
-Nonviolent Communication (NVC) was developed by Marshall Rosenberg and published in *Nonviolent Communication: A Language of Life* (1999). It was designed for conflict resolution. Its four-step structure — Observation, Feeling, Need, Request — maps almost exactly onto what incident communication requires.
+Nonviolent Communication (NVC) was developed by Marshall Rosenberg and published in *Nonviolent Communication: A Language of Life* (1999). It was designed for conflict resolution. Its four-step structure (Observation, Feeling, Need, Request) maps almost exactly onto what incident communication requires.
 
 NVC is not soft skills appended to a technical process. It is a precision tool that eliminates the most expensive failure mode in incident response: miscommunication under stress.
 
-The structural parallel is direct. In conflict resolution, two people have different perceptions of the same event. In incident response, an engineer and a client have different information about the same system failure. The failure mode is identical — evaluation masquerading as observation, leading to defensive communication, leading to a loop that consumes time without producing information.
+The structural parallel is direct. In conflict resolution, two people have different perceptions of the same event. In incident response, an engineer and a client have different information about the same system failure. The failure mode is identical: evaluation masquerading as observation, leading to defensive communication, leading to a loop that consumes time without producing information.
 
-The NVC four-step structure breaks this loop at the first step. An engineer who stays in observation language under pressure — "the database has been unreachable for 12 minutes since the 14:30 deployment" rather than "the database is broken" — has already made the next 30 minutes more productive than they would have been otherwise.
+The NVC four-step structure breaks this loop at the first step. An engineer who stays in observation language under pressure ("the database has been unreachable for 12 minutes since the 14:30 deployment" rather than "the database is broken") has already made the next 30 minutes more productive than they would have been otherwise.
 
 ---
 
@@ -128,6 +134,7 @@ incident-response-runbook/
     etiquette.md
   scripts/
     validate_runbook_repo.py
+  RELEASING.md
   SECURITY.md
   LICENSE
   README.md
@@ -143,20 +150,10 @@ CI validates relative Markdown links, fenced code blocks, README index coverage,
 python scripts/validate_runbook_repo.py
 ```
 
----
-
-## Public Release Checklist
-
-Before tagging a public baseline, verify:
-
-- README links resolve;
-- flagship runbooks are generic and do not contain private client names, internal hostnames, or credentials;
-- commands are presented as examples and include platform context;
-- destructive or irreversible actions are explicitly escalated, not normalized;
-- post-mortem examples remain synthetic and do not identify real incidents.
+For release verification steps, see [`RELEASING.md`](RELEASING.md).
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT (see [LICENSE](LICENSE)).

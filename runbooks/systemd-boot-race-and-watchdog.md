@@ -40,7 +40,7 @@ systemctl list-timers --all --no-pager
 
 ---
 
-## Step 1 — Immediate Mitigation
+## Step 1: Immediate Mitigation
 
 1. **Check unit state and underlying resource health:**
    - Verify DNS resolution, target DB/API connectivity, and disk mounts (`df -h`, `findmnt`) before restarting.
@@ -55,7 +55,7 @@ systemctl list-timers --all --no-pager
 
 ---
 
-## Step 2 — Durable Fix (Unit Drop-In & Failure Alerting)
+## Step 2: Durable Fix (Unit Drop-In & Failure Alerting)
 
 Create an explicit drop-in override rather than editing vendor files directly:
 
