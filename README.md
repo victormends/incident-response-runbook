@@ -13,7 +13,7 @@ This repository is a reusable public runbook template. It is not emergency suppo
 
 ## Origin & Scope
 
-All runbooks, diagnostic checklists, and post-mortems in this repository are generic, vendor-neutral operational templates derived from field incidents, using strictly synthetic examples, placeholder identifiers, and anonymized topologies.
+All runbooks, diagnostic checklists, and post-mortems in this repository are generic PostgreSQL playbooks paired with AWS cloud runbooks (Aurora MySQL, EKS Spot/Karpenter, EC2/systemd) derived from field incidents, using strictly synthetic examples, placeholder identifiers, and anonymized topologies.
 
 ---
 
